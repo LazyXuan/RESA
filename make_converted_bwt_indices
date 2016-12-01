@@ -1,0 +1,49 @@
+#!/usr/bin/bash
+
+###
+# Copyright 2016 Miler T. Lee, University of Pittburgh
+# This file is part of the RESA Suite
+#
+# RESA Suite is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# RESA Suite is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with RESA Suite.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# make_converted_bwt_indices: Makes bisulfite converted bowtie2 indices
+#
+# Usage: ./make_converted_bwt_indices <wt_genome_fasta> <output_dir>"
+##
+
+
+
+if [ $1 == "-h" ]; then
+    echo
+    echo "Usage: make_converted_bwt_indices <wt_genome_fasta> <output_dir>"
+    echo
+    exit 1
+fi
+
+BOWTIE_BUILD=bowtie2-build
+
+FA=$1
+
+C2T=$2/c2t
+G2A=$2/g2a
+
+mkdir -p $C2T
+mkdir -p $G2A
+
+sed '/>r/!s/C/T/g' $FA | sed '/^>/!s/c/t/g' > $C2T/genome.fa
+sed '/>r/!s/G/A/g' $FA | sed '/^>/!s/g/a/g' > $G2A/genome.fa
+
+$BOWTIE_BUILD $C2T/genome.fa $C2T/genome
+$BOWTIE_BUILD $G2A/genome.fa $G2A/genome

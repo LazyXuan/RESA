@@ -1,0 +1,212 @@
+#!/usr/bin/bash
+
+###
+# Copyright 2016 Miler T. Lee, University of Pittburgh
+# This file is part of the RESA Suite
+#
+# RESA Suite is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# RESA Suite is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with RESA Suite.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# resa_map: Sequencing read alignment for downstream RESA analysis
+#
+#USAGE: resa_map [-m] -x <wt_bowtie_index> -G <gene_gtf_file> [-c <c2t_bowtie_index> -g <g2a_bowtie_index>] [-i <fastq_dir> | -1 <read1_fastq_files_comma_delim>  -2 <read2_fastq_files_comma_delim> ] -o <output_directory=.>
+##
+
+
+##Executables
+TOPHAT=tophat
+SAMTOOLS=samtools
+BAM2FASTX=bam2fastx  #bundled with Tophat
+
+##Variables
+DO_MUT=0
+SCRIPTS_DIR=
+WT_INDEX=
+C2T_INDEX=
+G2A_INDEX=
+FQDIR=
+FQ1=
+FQ2=
+TOPHAT_DIR=.
+GTF_SWITCH=
+
+usage()
+{
+    cat <<EOF
+
+    Usage: resa_map [-m] -x <wt_bowtie_index> -G <gene_gtf_file> -i <fastq_dir> | -1 <read1_fastq_files_comma_delim> [ -2 <read2_fastq_files_comma_delim> ] [-s <scripts_directory> -c <c2t_bowtie_index> -g <g2a_bowtie_index>] [ -o <output_directory> ]
+
+    Runs Tophat alignment for RESA sequencing reads
+
+    OPTIONS:
+    -h              Show this message
+    -m              Do converted base protocol (RESA-Bisulfite treatment)
+    -s              Path to scripts directory where fastq_seq_in_id and bam_seq_convert.py can be found.
+                    This is required if -m is specified
+    -x <index>      Wild-type Bowtie index (passed to Tophat)
+    -G <gtf>        UTR GTF file
+    -c <index>      C2T converted Bowtie index
+    -g <index>      G2A converted Bowtie index
+    -i <dir>        Fastq directory with Illumina-style named files (R1 and R2);
+                    ignored if -1 and -2 are specified
+    -1 <fastq_list> Comma-separated list of Read1 Fastq files
+    -2 <fastq_list> Comma-separated list of Read2 Fastq files
+    -o <dir>        Output directory (default .)
+
+EOF
+}
+
+
+
+while getopts ":hms:x:c:g:i:o:1:2:G:" opt; do
+    case $opt in
+	h)
+	    usage
+	    exit 1
+	    ;;
+	m)
+	    DO_MUT=1
+	    ;;
+	s)
+	    SCRIPTS_DIR=$OPTARG
+	    ;;
+	G)
+	    GTF_SWITCH="-G $OPTARG"
+	    ;;
+	x)
+	    WT_INDEX=$OPTARG
+	    ;;
+	c)
+	    C2T_INDEX=$OPTARG
+	    ;;
+	g)
+	    G2A_INDEX=$OPTARG
+	    ;;
+	i)
+	    FQDIR=$OPTARG
+	    ;;
+	1)
+	    FQ1=$OPTARG
+	    ;;
+	2)
+	    FQ2=$OPTARG
+	    ;;
+	o)
+	    TOPHAT_DIR=$OPTARG
+	    ;;
+	\?)
+	    echo "Unknown option: -$OPTARG"
+	    exit 1
+	    ;;
+	:)
+	    echo "-$OPTARG requires an argument"
+	    exit 1
+	    ;;
+    esac
+done
+
+
+if [ "$WT_INDEX" == "" ]; then
+    echo "No Bowtie index provided"
+    exit 1
+elif [ "$GTF_SWITCH" == "" ]; then
+    echo "Warning: no gene GTF file provided"
+elif [ "$FQDIR" == "" ] && [ $1 == "" ]; then
+    echo "No fastq files or directory provided"
+    exit 1
+elif [ "$DO_MUT" == 1 ] && [ "$SCRIPTS_DIR" == "" ]; then
+    echo "-m specified but no scripts directory specified"
+    exit 1
+elif [ "$DO_MUT" == 1 ] && [ "$C2T_INDEX" == "" ]; then
+    echo "-m specified but no C2T Bowtie index provided"
+    exit 1
+elif [ "$DO_MUT" == 1 ] && [ "$G2A_INDEX" == "" ]; then
+    echo "-m specified but no G2A Bowtie index provided"
+    exit 1
+fi
+
+
+##Run Tophat on WT
+
+if [ -z $FQ1 ]; then
+    FQ1=$(ls $FQDIR/*R1*.gz | sort | tr '\n' ',' | sed '$s/.$//') #horribly complicated!
+    FQ2=$(ls $FQDIR/*R2*.gz | sort | tr '\n' ',' | sed '$s/.$//') #horribly complicated!
+fi
+
+TOPHAT_CMD="$TOPHAT -p6 --no-discordant --no-mixed --library-type fr-firststrand --transcriptome-only"
+
+if [ "$DO_MUT" == 0 ]; then
+   TOPHAT_CMD="$TOPHAT_CMD --read-mismatches 7 --read-gap-length 7 --read-edit-dist 7 --segment-mismatches 3 --b2-very-sensitive"
+fi
+   
+
+WT_TOPHAT=$TOPHAT_DIR/wt
+mkdir -p $WT_TOPHAT
+
+$TOPHAT_CMD $GTF_SWITCH -o $WT_TOPHAT $WT_INDEX $FQ1 $FQ2
+$SAMTOOLS index $WT_TOPHAT/accepted_hits.bam
+
+if [ "$DO_MUT" == 0 ]; then
+    exit 0
+fi
+
+
+##Auxillary scripts for bisulfite alignment
+FASTQID=$SCRIPTS_DIR/fastq_seq_in_id
+BAMCONVERT=$SCRIPTS_DIR/bam_seq_convert.py
+
+
+##Run Tophat on conversions
+C2T_CONV=$TOPHAT_DIR/c2t_reads
+G2A_CONV=$TOPHAT_DIR/g2a_reads
+
+C2T_C2T_TOPHAT=$C2T_CONV/c2t_tophat
+C2T_G2A_TOPHAT=$C2T_CONV/g2a_tophat
+G2A_C2T_TOPHAT=$G2A_CONV/c2t_tophat
+G2A_G2A_TOPHAT=$G2A_CONV/g2a_tophat
+
+mkdir -p $C2T_C2T_TOPHAT
+mkdir -p $C2T_G2A_TOPHAT
+mkdir -p $G2A_C2T_TOPHAT
+mkdir -p $G2A_G2A_TOPHAT
+
+
+#Convert the unaligned bamfile from WT->C2T and WT->G2A. ***Read 1 is sense***
+#For paired, will create unmapped.1.fq and unmapped.2.fq
+$SAMTOOLS sort -n -O 'bam' -T 'temp' -o $WT_TOPHAT/unmapped_sorted.bam $WT_TOPHAT/unmapped.bam
+$BAM2FASTX --fastq -A --paired -o $WT_TOPHAT/unmapped.fq $WT_TOPHAT/unmapped_sorted.bam
+
+$FASTQID $WT_TOPHAT/unmapped.1.fq | sed 'n;s/C/t/g;n;n' | gzip > $C2T_CONV/reads.1.fq.gz
+$FASTQID $WT_TOPHAT/unmapped.2.fq | sed 'n;s/G/a/g;n;n' | gzip > $C2T_CONV/reads.2.fq.gz
+
+$FASTQID $WT_TOPHAT/unmapped.1.fq | sed 'n;s/G/a/g;n;n' | gzip > $G2A_CONV/reads.1.fq.gz
+$FASTQID $WT_TOPHAT/unmapped.2.fq | sed 'n;s/C/t/g;n;n' | gzip > $G2A_CONV/reads.2.fq.gz
+
+
+#Run tophat with C2T reads on C2T genome and G2A genomes
+$TOPHAT_CMD $GTF_SWITCH -o $C2T_C2T_TOPHAT $C2T_INDEX $C2T_CONV/reads.1.fq.gz $C2T_CONV/reads.2.fq.gz
+$TOPHAT_CMD $GTF_SWITCH -o $C2T_G2A_TOPHAT $G2A_INDEX $C2T_CONV/reads.1.fq.gz $C2T_CONV/reads.2.fq.gz
+
+#Run tophat with G2A reads on C2T genome and G2A genomes
+$TOPHAT_CMD $GTF_SWITCH -o $G2A_C2T_TOPHAT $C2T_INDEX $G2A_CONV/reads.1.fq.gz $G2A_CONV/reads.2.fq.gz
+$TOPHAT_CMD $GTF_SWITCH -o $G2A_G2A_TOPHAT $G2A_INDEX $G2A_CONV/reads.1.fq.gz $G2A_CONV/reads.2.fq.gz
+
+#Convert all of the bamfile read sequences
+for tophat_out in $C2T_C2T_TOPHAT $C2T_G2A_TOPHAT $G2A_C2T_TOPHAT $G2A_G2A_TOPHAT
+do
+    python $BAMCONVERT $tophat_out/accepted_hits.bam | $SAMTOOLS view -hSb -o $tophat_out/accepted_hits_converted.bam -
+    $SAMTOOLS index $tophat_out/accepted_hits_converted.bam
+done
+
+
