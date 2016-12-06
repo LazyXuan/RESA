@@ -6,7 +6,7 @@ Support for the RNA Element Selection Assay (Yartseva et al, 2017)
   * A corresponding FASTA file (in the correct strand orientation) of these regions (can be produced using `bedtools fastaFromBed`)
   * RESA RNA-Seq fastq files or equivalent, for the experimental and the control conditions (which we will name "expt" and "ctrl")
   
-2. Map your sequencing reads using your favorite aligner (e.g., Tophat) and output as bamfiles
+2. Map your sequencing reads to the **_whole genome_** using your favorite aligner (e.g., Tophat) and output as bamfiles
 
 3. Calculate coverage using `resa_coverage.py`, which will produce a pickled data file (in this example, it will be called `my_resa.coverage.pkl`):
 
