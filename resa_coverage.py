@@ -60,7 +60,7 @@ FSAMFLAGS = FSAMFLAGS_STRICT_PAIRED
 # Construct names of bamfiles produced through resa_map
 ### 
 
-TOPHAT_DIR = 'tophat-utr'
+TOPHAT_DIR = '' #'tophat-utr'
 WT_BAM = 'wt/accepted_hits.bam'
 #C2T,G2A
 MUT_BAMS = {'+': ['c2t_reads/c2t_tophat/accepted_hits_converted.bam',
