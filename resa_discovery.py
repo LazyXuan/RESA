@@ -331,7 +331,7 @@ def region_finder(loci, profiles, expt, ctrl, ratio_fn = profile_ratio, count_fn
 
         #Update the ratio list
         if do_bedgraph:
-            ratio_cache += bedgraph_entries(chr, strand, pr[feat_id], tx_coords)
+            ratio_cache += bedgraph_entries(chr, pr[feat_id], tx_coords)
         
         #Identify motif locations
         feat_motifs = motif_locs(seq, motifs, window = 1)
@@ -415,7 +415,11 @@ def region_finder(loci, profiles, expt, ctrl, ratio_fn = profile_ratio, count_fn
         output_region_seq(regions, outfile_root, do_valley = not peaks_only)
 
         if do_bedgraph:
-            output_region_bedgraph(ratio_cache, outfile_root + '.bedgraph', header_name = '%s/%s' % (expt, ctrl))
+            if write_bedgraph_header:
+                header_name = header_name = '%s/%s' % (expt, ctrl)
+            else:
+                header_name = ''
+            output_region_bedgraph(ratio_cache, outfile_root + '.bedgraph', header_name = header_name)
     return regions
     
 
@@ -437,8 +441,8 @@ if __name__ == "__main__":
     reg.add_argument('--min_expt_coverage', type=int, help='Minimum X coverage of a responsive region to return, as measured by raw read counts in the expt condition overlapping the critical point (default=0)', default=0)
     reg.add_argument('--fold_thresh', type=float, help='Fold difference threshold, expt vs ctrl, must be > 1 (default=1.25)', default=1.25)
     reg.add_argument('--motifs', type=str, help='Quoted comma-delimited list of labels:motifs (e.g., "mir430:GCACTT,are:ATTTTA") to identify in responsive regions. Python-style regular expressions are supported.', default='')
-    reg.add_argument('--write_bedgraph', action='store_true', help='Write a bedgraph of the expt/ctrl ratio (default=True)')
-    reg.add_argument('--write_bedgraph_header', action='store_true', help='Include a track header line on the bedgraph (default=True)')
+    reg.add_argument('--no_bedgraph', action='store_true', help='Do not write the bedgraph of the expt/ctrl ratio (default=False)')
+    reg.add_argument('--no_bedgraph_header', action='store_true', help='Do not include a track header line on the bedgraph (default=False)')
     
     req = parser.add_argument_group('required named arguments')
     req.add_argument('-u', '--utrbed', type=str, help='Utr BED12 file', required = True)
@@ -468,7 +472,7 @@ if __name__ == "__main__":
     #Do tasks
     low_conf_thresh = min(1.25, args.fold_thresh)    
     if args.task == 'regions':
-        result = region_finder(loci, profiles, args.expt, args.ctrl, motifs = motifs, lfc_thresh = math.log(args.fold_thresh, 2), low_conf_lfc_thresh = math.log(low_conf_thresh, 2), min_peak_width = args.min_region_width, min_ctrl_coverage = args.min_ctrl_coverage, outfile_root = args.outprefix + '.regions', do_bedgraph = args.write_bedgraph, write_bedgraph_header = args.write_bedgraph_header)
+        result = region_finder(loci, profiles, args.expt, args.ctrl, motifs = motifs, lfc_thresh = math.log(args.fold_thresh, 2), low_conf_lfc_thresh = math.log(low_conf_thresh, 2), min_peak_width = args.min_region_width, min_ctrl_coverage = args.min_ctrl_coverage, outfile_root = args.outprefix + '.regions', do_bedgraph = not args.no_bedgraph, write_bedgraph_header = not args.no_bedgraph_header)
     elif args.task == 'clip':
         result = region_finder(loci, profiles, args.expt, args.ctrl, ratio_fn = clip_positive_profile_ratio, motifs = motifs, lfc_thresh = math.log(args.fold_thresh, 2), low_conf_lfc_thresh = math.log(low_conf_thresh, 2), min_peak_width = args.min_region_width, min_ctrl_coverage = args.min_ctrl_coverage, min_expt_coverage = args.min_expt_coverage, outfile_root = args.outprefix + '.clip', peaks_only = True, do_bedgraph = args.write_bedgraph, write_bedgraph_header = args.write_bedgraph_header)
     elif args.task == 'bisulfite':
