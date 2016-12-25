@@ -498,9 +498,10 @@ def conversion_blocks(wt_base, bamfile_list, coord, strand, ref_chr_seq, samflag
     return base_counts
     
 
-def calculate_conversions(loci, samples, k = 1, antisense = False, genome_fa = None, read_select_fn = None):
+def calculate_conversions(loci, samples, max_k = 1, antisense = False, genome_fa = None, read_select_fn = None):
     """
-    conv[sampleID][featID][base][position] = [(wt, mut, other), ...]
+    conv[k-1][sampleID][featID][base][position] = [(wt, mut, other), ...]
+    where k = number of linked bases
     """
 
     try:
@@ -508,45 +509,49 @@ def calculate_conversions(loci, samples, k = 1, antisense = False, genome_fa = N
     except IOError:
         sys.exit('***ERROR: Genome fasta not found: %s, exiting' % genome_fa)    
         
-    profiles = {}
+    all_profiles = []
     bases = ['C', 'G']
-    
-    for counter, (feat_id, feat_data) in enumerate(loci.items()):
-        chr, strand, exons = feat_data[:3]
-        start = exons[0][0]
-        end = exons[-1][1]
-        coord = '%s:%d-%d' % (chr, start, end)
-        tx_coords = ru.tx_indexing(exons, strand == '-')        
-        tx_coords_inv = ru.tx_indexing(exons, strand == '-', inverse=True)    
 
-        ref_chr_seq = chr_seqs[chr]
-        
-        if antisense:
-            strand = ru.anti_strand_str[strand]
+    for k_index in range(max_k):
+        k = k_index + 1
+        profiles = {}    
+        for counter, (feat_id, feat_data) in enumerate(loci.items()):
+            chr, strand, exons = feat_data[:3]
+            start = exons[0][0]
+            end = exons[-1][1]
+            coord = '%s:%d-%d' % (chr, start, end)
+            tx_coords = ru.tx_indexing(exons, strand == '-')        
+            tx_coords_inv = ru.tx_indexing(exons, strand == '-', inverse=True)    
 
-        for sample_label, bamfile_dict in sorted(samples.items()):
-            if sample_label not in profiles:
-                profiles[sample_label] = {}
-                
-            if feat_id not in profiles[sample_label]:
-                profiles[sample_label][feat_id] = {}
-                profiles[sample_label][feat_id]['C'] = [[] for i in range(1+max(tx_coords.values()))]
-                profiles[sample_label][feat_id]['G'] = [[] for i in range(1+max(tx_coords.values()))]
-                                
-            bamfiles = bamfile_dict[strand]
-            for btuple in bamfiles:            
-                for bamfile, base in zip(btuple, bases):
-                    conv = conversion_blocks(base, [bamfile], coord, strand, ref_chr_seq, SAMFLAGS[strand], read_select_fn, k = k, Fsamflag = FSAMFLAGS[strand])
+            ref_chr_seq = chr_seqs[chr]
 
-                    for i, x in enumerate(profiles[sample_label][feat_id][base]):
-                        genomic_coord = tx_coords_inv.get(i, -1)
-                        if genomic_coord > -1:
-                            profiles[sample_label][feat_id][base][i].append(conv.get(genomic_coord, [0,0,0]))
+            if antisense:
+                strand = ru.anti_strand_str[strand]
 
-        #Status counter
-        if counter % 50 == 0:
-            sys.stderr.write('%d out of %d regions completed\n' % (counter, len(loci)))
-    return profiles
+            for sample_label, bamfile_dict in sorted(samples.items()):
+                if sample_label not in profiles:
+                    profiles[sample_label] = {}
+
+                if feat_id not in profiles[sample_label]:
+                    profiles[sample_label][feat_id] = {}
+                    profiles[sample_label][feat_id]['C'] = [[] for i in range(1+max(tx_coords.values()))]
+                    profiles[sample_label][feat_id]['G'] = [[] for i in range(1+max(tx_coords.values()))]
+
+                bamfiles = bamfile_dict[strand]
+                for btuple in bamfiles:            
+                    for bamfile, base in zip(btuple, bases):
+                        conv = conversion_blocks(base, [bamfile], coord, strand, ref_chr_seq, SAMFLAGS[strand], read_select_fn, k = k, Fsamflag = FSAMFLAGS[strand])
+
+                        for i, x in enumerate(profiles[sample_label][feat_id][base]):
+                            genomic_coord = tx_coords_inv.get(i, -1)
+                            if genomic_coord > -1:
+                                profiles[sample_label][feat_id][base][i].append(conv.get(genomic_coord, [0,0,0]))
+
+            #Status counter
+            if counter % 50 == 0:
+                sys.stderr.write('%d out of %d regions completed for linked_bases = %d\n' % (counter, len(loci), k))
+        all_profiles.append(profiles)
+    return all_profiles
 
 
 
@@ -566,7 +571,7 @@ if __name__ == "__main__":
     parser.add_argument('--maxfraglen', type=int, help='Maximum end-to-end fragment length of read pairs to include (only compatible with coverage task) (default=500)', default=500)
     parser.add_argument('--duplimit', type=int, help='Maximum number of times a fragment with identical start and end coordinate can be used. Only compatible with coverage task (default=no limit)', default=0)
     parser.add_argument('--strictdupfilter', action='store_true', help='Impose a stricter policy for read filtering by (non-deterministically) selecting at most <duplimit> fragments that start or end at each coordinate. I.e., a read pair is ignored if one of the read starts has already been seen <duplimit> number of times. However, reads aligning to the ends of UTR amplicons are exempted. Only compatible with coverage task, and --duplimit must also be specified (default=False)')    
-    parser.add_argument('--linkedbases', type=int, help='For conversion task, number of consecutive bases to group together (default=1)', default=1)
+    parser.add_argument('--linkedbases', type=int, help='For conversion task, maximum number of consecutive bases to treat as linked (default=1)', default=1)
     
     parser.add_argument('--samples_as_bam', action="store_true", help='Treat sample_list as bamfiles rather than directory names (only valid with coverage and stats tasks) (default=False)')
     req = parser.add_argument_group('required named arguments')
@@ -619,7 +624,7 @@ if __name__ == "__main__":
     elif args.task == 'conversions':
         if not args.genome_fasta:
             sys.exit('***ERROR: --genome_fasta required for conversions task, exiting.')
-        result = calculate_conversions(loci, samples, antisense = flip_strand, k = args.linkedbases, genome_fa = args.genome_fasta)
+        result = calculate_conversions(loci, samples, antisense = flip_strand, max_k = args.linkedbases, genome_fa = args.genome_fasta)
         args.task = 'conversions_%d' % args.linkedbases
 
         
